@@ -11,6 +11,8 @@ Despliegue en la nube (URL pública):
 
 import streamlit as st
 import matplotlib.pyplot as plt
+# Importación directa del motor matemático y los parámetros experimentales del artículo
+# (evita duplicar ecuaciones entre la interfaz web y el script científico principal).
 from simulacion_flotacion_pid import (
     SIMC_PARAMS_FINAL,
     SIMC_PARAMS_INITIAL,
@@ -31,11 +33,14 @@ st.caption(
 
 with st.sidebar:
     st.header("Parámetros de Simulación")
+    # Duración experimental del artículo: hasta 15 min = 900 s (Pág. 13) o ventana de 600 s (Fig. 14).
     duracion_s = st.slider("Duración [s]", 300, 900, 600, step=60)
+    # Selector entre los dos conjuntos de sintonización reportados en la Tabla 2 (Pág. 12).
     preset = st.selectbox(
         "Sintonización SIMC (Tabla 2)",
         ["Final (Tabla 2)", "Inicial SIMC (Tabla 2)", "Personalizado"],
     )
+    # Turbulencia por aireación constante a Q_air = 47 lpm (Pág. 7) y filtro medfilt1 de 10 s (Pág. 13).
     ruido_std = st.slider("Ruido sensor por aireación [cm]", 0.0, 0.4, 0.12, step=0.02)
     usar_filtro = st.checkbox("Filtro de mediana móvil (10 s)", value=True)
 
@@ -77,6 +82,9 @@ with st.sidebar:
                 {"Kc": kc, "tau_i": tau_i, "tau_d": tau_d, "K_ff": k_ff}
             )
 
+# Ejecución paralela de ambos modos del artículo (Pág. 13, Fig. 14):
+# 1) Solo realimentación (Feedback-only, K_ff = 0)
+# 2) Realimentación + acción anticipativa (Feedback + Feedforward, Ecs. 7 y 8)
 res_fb = simular_banco_flotacion(
     duracion_s=duracion_s,
     modo="feedback",
@@ -92,6 +100,7 @@ res_ff = simular_banco_flotacion(
     usar_filtro_mediana=usar_filtro,
 )
 
+# Comparación cuantitativa mediante IAE_i = integral(|e_i|) dt [cm·s] (Ec. 9)
 cols = st.columns(3)
 for i, col in enumerate(cols):
     mejora = (res_fb["iae"][i] - res_ff["iae"][i]) / max(res_fb["iae"][i], 1e-6) * 100.0
