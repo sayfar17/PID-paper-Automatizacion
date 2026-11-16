@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Simulación Control de Nivel PI/PID + Feedforward - Banco de Flotación (Quintanilla et al., 2023)</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --card: #ffffff;
+      --border: #dce3ef;
+      --text: #1b2434;
+      --muted: #5a677d;
+      --primary: #1d4ed8;
+      --accent: #0f766e;
+      --danger: #dc2626;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+    }
+    header {
+      background: #0f172a;
+      color: #f8fafc;
+      padding: 18px 28px;
+      border-bottom: 3px solid var(--primary);
+    }
+    header h1 { margin: 0 0 4px; font-size: 1.25rem; }
+    header p { margin: 0; font-size: 0.88rem; color: #cbd5e1; }
+    .layout {
+      display: grid;
+      grid-template-columns: 330px 1fr;
+      gap: 18px;
+      padding: 18px 24px;
+      max-width: 1520px;
+      margin: 0 auto;
+    }
+    @media (max-width: 1024px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+    }
+    .sidebar h2, .main h2 {
+      margin: 0 0 12px;
+      font-size: 1rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 6px;
+    }
+    .field { margin-bottom: 12px; }
+    .field label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.84rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .field input[type="range"],
+    .field select,
+    .field input[type="number"] {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      font-size: 0.86rem;
+    }
+    .field input[type="range"] { padding: 0; }
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.86rem;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+    details {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      margin-bottom: 10px;
+      background: #fafcff;
+    }
+    summary {
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.86rem;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    @media (max-width: 768px) {
+      .metrics { grid-template-columns: 1fr; }
+    }
+    .metric-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    .metric-card .label { font-size: 0.8rem; color: var(--muted); font-weight: 600; }
+    .metric-card .val { font-size: 1.35rem; font-weight: 700; margin: 4px 0; }
+    .metric-card .delta { font-size: 0.82rem; color: var(--accent); font-weight: 600; }
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    @media (max-width: 900px) {
+      .charts-grid { grid-template-columns: 1fr; }
+    }
+    .chart-box {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      background: #fff;
+    }
+    .chart-title {
+      font-size: 0.86rem;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 6px;
+    }
+    canvas { width: 100%; height: 240px; display: block; }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      justify-content: center;
+      font-size: 0.8rem;
+      margin: 10px 0 14px;
+    }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .swatch { width: 18px; height: 3px; display: inline-block; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+      margin-top: 12px;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 6px 8px;
+      text-align: left;
+    }
+    th { background: #f1f5f9; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Control de Nivel Feedback-Feedforward en Banco de Flotación (3 Celdas en Serie)</h1>
+    <p>Réplica exacta del modelo integrador con retardo, calibración PLC 16-bit y sintonización SIMC — Quintanilla et al. (2023), <em>MethodsX</em> 10, 102081</p>
+  </header>
+
+  <div class="layout">
+    <aside class="card sidebar">
+      <h2>Parámetros de Simulación</h2>
+
+      <div class="field">
+        <label><span>Duración [s]</span><span id="lbl-duracion">600</span></label>
+        <input type="range" id="duracion" min="300" max="900" step="60" value="600" />
+      </div>
+
+      <div class="field">
+        <label for="preset"><span>Sintonización SIMC (Tabla 2)</span></label>
+        <select id="preset">
+          <option value="final">Final (Tabla 2)</option>
+          <option value="initial">Inicial SIMC (Tabla 2)</option>
+          <option value="custom">Personalizado</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label><span>Ruido sensor por aireación [cm]</span><span id="lbl-ruido">0.12</span></label>
+        <input type="range" id="ruido" min="0" max="0.4" step="0.02" value="0.12" />
+      </div>
+
+      <label class="checkbox-row">
+        <input type="checkbox" id="filtro-mediana" checked />
+        Filtro de mediana móvil (10 s)
+      </label>
+
+      <div id="celdas-params"></div>
+
+      <table>
+        <thead>
+          <tr><th colspan="2">Especificaciones del Sistema (Artículo)</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Geometría celda</td><td>30 × 30 × 45 cm (900 cm²)</td></tr>
+          <tr><td>Tanque T-1 / Rango sensor</td><td>130 L / 0–39 cm</td></tr>
+          <tr><td>Aireación constante</td><td>Q_air = 47 lpm (j_g = 0.87 cm/s)</td></tr>
+          <tr><td>Modelo G_p(s)</td><td>k' = -0.001018, θ = [7, 6, 3] s</td></tr>
+          <tr><td>PLC 16-bit</td><td>0–32,767 bits, Ts = 1 s</td></tr>
+        </tbody>
+      </table>
+    </aside>
+
+    <main class="main">
+      <div class="metrics" id="metrics"></div>
+
+      <div class="card">
+        <h2>Comparación Feedback-only vs. Feedback + Feedforward (Fig. 14)</h2>
+        <div class="legend">
+          <span><i class="swatch" style="background:#dc2626"></i> Setpoint h_sp [cm]</span>
+          <span><i class="swatch" style="background:#2563eb"></i> Nivel filtrado h_p [cm]</span>
+          <span><i class="swatch" style="background:#111827"></i> Q_tailings u(t) [lpm]</span>
+          <span><i class="swatch" style="border-top:2px dashed #06b6d4;height:0"></i> Perturbación Q_d(t) [lpm]</span>
+        </div>
+        <div class="charts-grid" id="charts-grid"></div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // =========================================================================
+    // 1. PARÁMETROS EXACTOS DEL ARTÍCULO Y DEL SCRIPT PYTHON
+    // =========================================================================
+    const ANCHO_CELDA_CM = 30.0;
+    const LARGO_CELDA_CM = 30.0;
+    const ALTO_CELDA_CM = 45.0;
+    const AREA_CELDA_CM2 = ANCHO_CELDA_CM * LARGO_CELDA_CM; // 900 cm^2
+    const CAPACIDAD_TANQUE_L = 130.0;
+    const SENSOR_NIVEL_MIN_CM = 0.0;
+    const SENSOR_NIVEL_MAX_CM = 39.0;
+
+    const Q_AIR_LPM = 47.0;
+    const J_G_CM_S = Q_AIR_LPM * (1000.0 / 60.0) / AREA_CELDA_CM2; // ~0.87 cm/s
+
+    const K_PRIME = -0.001018;
+    const THETA_S = [7, 6, 3];
+
+    const PUMP_SLOPES = {
+      feed: 0.0035,
+      cell1: 0.0029,
+      cell2: 0.0033,
+      cell3: 0.0033,
+    };
+    const PLC_MAX_BITS = 32767;
+
+    const LEVEL_SENSOR_CAL = [
+      { m: -0.0018, b: 40.1363 },
+      { m: -0.0019, b: 43.8823 },
+      { m: -0.0020, b: 41.2930 },
+    ];
+
+    const SIMC_PARAMS_FINAL = [
+      { Kc: -62.0, tau_i: 56.0, tau_d: 0.0, K_ff: 0.8 },
+      { Kc: -76.0, tau_i: 30.0, tau_d: 0.0, K_ff: 0.8 },
+      { Kc: -85.0, tau_i: 44.0, tau_d: 0.0, K_ff: 1.0 },
+    ];
+
+    const SIMC_PARAMS_INITIAL = [
+      { Kc: -70.2, tau_i: 56.0, tau_d: 0.0, K_ff: 0.8 },
+      { Kc: -81.8, tau_i: 48.0, tau_d: 0.0, K_ff: 0.8 },
+      { Kc: -78.1, tau_i: 52.0, tau_d: 0.0, K_ff: 1.0 },
+    ];
+
+    function clip(val, minVal, maxVal) {
+      return Math.min(maxVal, Math.max(minVal, val));
+    }
+
+    function roundHalfToEven(x) {
+      const f = Math.floor(x);
+      const diff = x - f;
+      if (diff > 0.5) return f + 1;
+      if (diff < 0.5) return f;
+      return f % 2 === 0 ? f : f + 1;
+    }
+
+    function cmToPlcBits(hCm, cellIdx) {
+      const cal = LEVEL_SENSOR_CAL[cellIdx];
+      const hClamped = clip(hCm, SENSOR_NIVEL_MIN_CM, SENSOR_NIVEL_MAX_CM);
+      const bits = (hClamped - cal.b) / cal.m;
+      return clip(roundHalfToEven(bits), 0, PLC_MAX_BITS);
+    }
+
+    function plcBitsToCm(bits, cellIdx) {
+      const cal = LEVEL_SENSOR_CAL[cellIdx];
+      return cal.m * bits + cal.b;
+    }
+
+    function lpmToPlcBits(qLpm, pumpKey) {
+      const bits = qLpm / PUMP_SLOPES[pumpKey];
+      return clip(roundHalfToEven(bits), 0, PLC_MAX_BITS);
+    }
+
+    function plcBitsToLpm(bits, pumpKey) {
+      return PUMP_SLOPES[pumpKey] * bits;
+    }
+
+    function median(arr) {
+      const s = arr.slice().sort((a, b) => a - b);
+      const n = s.length;
+      if (n % 2 === 1) return s[(n - 1) >> 1];
+      return 0.5 * (s[n / 2 - 1] + s[n / 2]);
+    }
+
+    function createSeededRng(seed) {
+      let state = seed >>> 0;
+      function nextUniform() {
+        state = (state + 0x6d2b79f5) >>> 0;
+        let t = Math.imul(state ^ (state >>> 15), 1 | state);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      }
+      return function normal(mean = 0, std = 1) {
+        if (std === 0) return mean;
+        const u1 = Math.max(nextUniform(), 1e-12);
+        const u2 = nextUniform();
+        const z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+        return mean + std * z0;
+      };
+    }
+
+    // =========================================================================
+    // 2. MOTOR DE SIMULACIÓN (EQUIVALENTE EXACTO A simulacion_flotacion_pid.py)
+    // =========================================================================
+    function generarPerfilesReferencia(nSteps, ts = 1.0) {
+      const t = new Array(nSteps);
+      const sp1 = new Array(nSteps);
+      const sp2 = new Array(nSteps);
+      const sp3 = new Array(nSteps);
+      const qFeed = new Array(nSteps);
+
+      for (let k = 0; k < nSteps; k++) {
+        const tk = k * ts;
+        t[k] = tk;
+        sp1[k] = tk < 180 ? 30.0 : tk < 420 ? 29.0 : 29.5;
+        sp2[k] = tk < 150 ? 34.0 : tk < 380 ? 33.0 : 33.5;
+        sp3[k] = tk < 200 ? 33.0 : tk < 450 ? 32.0 : 32.5;
+        qFeed[k] = tk >= 260 && tk < 320 ? 52.0 : tk >= 480 && tk < 540 ? 40.0 : 45.0;
+      }
+      return { t, setpoints: [sp1, sp2, sp3], qFeed };
+    }
+
+    function simularBancoFlotacion({
+      duracionS = 600,
+      ts = 1.0,
+      modo = "feedback_feedforward",
+      paramsCeldas = SIMC_PARAMS_FINAL,
+      ruidoStdCm = 0.12,
+      usarFiltroMediana = true,
+      seed = 42,
+    } = {}) {
+      const nextNormal = createSeededRng(seed);
+      const nSteps = Math.trunc(duracionS / ts);
+      const { t, setpoints, qFeed } = generarPerfilesReferencia(nSteps, ts);
+
+      const pumpKeys = ["cell1", "cell2", "cell3"];
+      const uMax = pumpKeys.map((k) => PUMP_SLOPES[k] * PLC_MAX_BITS);
+      const u0 = qFeed[0];
+
+      const hTrue = [new Array(nSteps).fill(0), new Array(nSteps).fill(0), new Array(nSteps).fill(0)];
+      const hMeasRaw = [new Array(nSteps).fill(0), new Array(nSteps).fill(0), new Array(nSteps).fill(0)];
+      const hFilt = [new Array(nSteps).fill(0), new Array(nSteps).fill(0), new Array(nSteps).fill(0)];
+      const uCmd = [new Array(nSteps).fill(0), new Array(nSteps).fill(0), new Array(nSteps).fill(0)];
+      const qDist = [new Array(nSteps).fill(0), new Array(nSteps).fill(0), new Array(nSteps).fill(0)];
+
+      for (let i = 0; i < 3; i++) {
+        hTrue[i][0] = setpoints[i][0];
+        const bitsInit = cmToPlcBits(hTrue[i][0], i);
+        hMeasRaw[i][0] = plcBitsToCm(bitsInit, i);
+        hFilt[i][0] = hMeasRaw[i][0];
+        uCmd[i][0] = u0;
+        qDist[i][0] = u0;
+      }
+
+      const integralErr = [0.0, 0.0, 0.0];
+      const prevErr = [0.0, 0.0, 0.0];
+
+      for (let k = 0; k < nSteps; k++) {
+        for (let i = 0; i < 3; i++) {
+          let qIn, qInPrev;
+          if (i === 0) {
+            qIn = qFeed[k];
+            qInPrev = k > 0 ? qFeed[k - 1] : qFeed[0];
+          } else {
+            qIn = uCmd[i - 1][k];
+            qInPrev = k > 0 ? uCmd[i - 1][k - 1] : uCmd[i - 1][0];
+          }
+          qDist[i][k] = qIn;
+
+          if (k > 0) {
+            const ruido = nextNormal(0.0, ruidoStdCm);
+            const bitsSensor = cmToPlcBits(hTrue[i][k] + ruido, i);
+            hMeasRaw[i][k] = plcBitsToCm(bitsSensor, i);
+          }
+
+          if (usarFiltroMediana) {
+            const winStart = Math.max(0, k - 9);
+            hFilt[i][k] = median(hMeasRaw[i].slice(winStart, k + 1));
+          } else {
+            hFilt[i][k] = hMeasRaw[i][k];
+          }
+
+          const err = setpoints[i][k] - hFilt[i][k];
+          const p = paramsCeldas[i];
+          const kc = p.Kc;
+          const tauI = p.tau_i;
+          const tauD = p.tau_d ?? 0.0;
+          const kFf = modo === "feedback_feedforward" ? p.K_ff : 0.0;
+
+          const dErr = k > 0 ? (err - prevErr[i]) / ts : 0.0;
+          const deltaQ = qIn - qInPrev;
+          const uFf = kFf * deltaQ;
+
+          const uFbTentative =
+            u0 + kc * (err + (integralErr[i] + err * ts) / tauI + tauD * dErr);
+          const uTotal = uFbTentative + uFf;
+
+          const uSat = clip(uTotal, 0.0, uMax[i]);
+          const saturatedHigh = uTotal >= uMax[i] && (kc * err) / tauI > 0.0;
+          const saturatedLow = uTotal <= 0.0 && (kc * err) / tauI < 0.0;
+          if (!(saturatedHigh || saturatedLow)) {
+            integralErr[i] += err * ts;
+          }
+
+          const bitsAct = lpmToPlcBits(uSat, pumpKeys[i]);
+          uCmd[i][k] = plcBitsToLpm(bitsAct, pumpKeys[i]);
+          prevErr[i] = err;
+        }
+
+        if (k < nSteps - 1) {
+          for (let i = 0; i < 3; i++) {
+            const delaySteps = Math.round(THETA_S[i] / ts);
+            const idxDelayed = Math.max(0, k - delaySteps);
+            const uDelayed = uCmd[i][idxDelayed];
+            const dhDt = K_PRIME * (uDelayed - qDist[i][k]);
+            const hNext = hTrue[i][k] + dhDt * ts;
+            hTrue[i][k + 1] = clip(hNext, 0.0, ALTO_CELDA_CM);
+          }
+        }
+      }
+
+      const iae = [0, 1, 2].map((i) => {
+        let s = 0.0;
+        for (let k = 0; k < nSteps; k++) {
+          s += Math.abs(setpoints[i][k] - hFilt[i][k]);
+        }
+        return s * ts;
+      });
+
+      return { t, setpoints, hTrue, hFilt, uCmd, qDist, iae };
+    }
+
+    // =========================================================================
+    // 3. INTERFAZ Y RENDERIZADO CANVAS
+    // =========================================================================
+    if (typeof document !== "undefined") {
+      const state = {
+        params: SIMC_PARAMS_FINAL.map((p) => ({ ...p })),
+      };
+
+      const elDuracion = document.getElementById("duracion");
+      const elLblDur = document.getElementById("lbl-duracion");
+      const elPreset = document.getElementById("preset");
+      const elRuido = document.getElementById("ruido");
+      const elLblRuido = document.getElementById("lbl-ruido");
+      const elFiltro = document.getElementById("filtro-mediana");
+      const elCeldas = document.getElementById("celdas-params");
+      const elMetrics = document.getElementById("metrics");
+      const elCharts = document.getElementById("charts-grid");
+
+      function buildCellControls() {
+        elCeldas.innerHTML = "";
+        const disabled = elPreset.value !== "custom";
+        for (let i = 0; i < 3; i++) {
+          const p = state.params[i];
+          const det = document.createElement("details");
+          if (i === 0) det.open = true;
+          det.innerHTML = `
+            <summary>Celda ${i + 1} (θ = ${THETA_S[i]} s)</summary>
+            <div class="grid-2">
+              <div class="field">
+                <label>Kc_${i + 1} [lpm/cm]</label>
+                <input type="number" step="0.5" data-i="${i}" data-k="Kc" value="${p.Kc}" ${disabled ? "disabled" : ""} />
+              </div>
+              <div class="field">
+                <label>τ_i${i + 1} [s]</label>
+                <input type="number" min="1" step="1" data-i="${i}" data-k="tau_i" value="${p.tau_i}" ${disabled ? "disabled" : ""} />
+              </div>
+              <div class="field">
+                <label>τ_d${i + 1} [s]</label>
+                <input type="number" min="0" step="0.5" data-i="${i}" data-k="tau_d" value="${p.tau_d}" ${disabled ? "disabled" : ""} />
+              </div>
+              <div class="field">
+                <label>K_ff${i + 1}</label>
+                <input type="number" min="0" max="1.5" step="0.05" data-i="${i}" data-k="K_ff" value="${p.K_ff}" ${disabled ? "disabled" : ""} />
+              </div>
+            </div>
+          `;
+          elCeldas.appendChild(det);
+        }
+
+        elCeldas.querySelectorAll("input").forEach((inp) => {
+          inp.addEventListener("change", () => {
+            const idx = Number(inp.dataset.i);
+            const key = inp.dataset.k;
+            let val = Number(inp.value);
+            if (key === "tau_i" && val < 1) val = 1;
+            if (key === "tau_d" && val < 0) val = 0;
+            state.params[idx][key] = val;
+            updateSimulation();
+          });
+        });
+      }
+
+      function drawPlot(canvas, res, cellIdx) {
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        const w = Math.max(320, Math.round(rect.width * dpr));
+        const h = Math.round(240 * dpr);
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.scale(dpr, dpr);
+
+        const cw = w / dpr;
+        const ch = h / dpr;
+        const pad = { l: 42, r: 42, t: 12, b: 28 };
+        const pw = cw - pad.l - pad.r;
+        const ph = ch - pad.t - pad.b;
+
+        ctx.clearRect(0, 0, cw, ch);
+        ctx.strokeStyle = "#e2e8f0";
+        ctx.lineWidth = 1;
+        for (let g = 0; g <= 4; g++) {
+          const y = pad.t + (ph * g) / 4;
+          ctx.beginPath();
+          ctx.moveTo(pad.l, y);
+          ctx.lineTo(pad.l + pw, y);
+          ctx.stroke();
+        }
+        ctx.strokeRect(pad.l, pad.t, pw, ph);
+
+        const t = res.t;
+        const n = t.length;
+        const tMax = t[n - 1] || 1;
+        const xOf = (idx) => pad.l + (t[idx] / tMax) * pw;
+        const yLevelOf = (val) => pad.t + ph - ((val - 24) / (38 - 24)) * ph;
+        const yFlowOf = (val) => pad.t + ph - (val / 105) * ph;
+
+        function strokeSeries(arr, yFn, color, width, dashed = false) {
+          ctx.save();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = width;
+          if (dashed) ctx.setLineDash([4, 3]);
+          ctx.beginPath();
+          for (let k = 0; k < n; k++) {
+            const x = xOf(k);
+            const y = clip(yFn(arr[k]), pad.t, pad.t + ph);
+            if (k === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        strokeSeries(res.qDist[cellIdx], yFlowOf, "#06b6d4", 1.1, true);
+        strokeSeries(res.uCmd[cellIdx], yFlowOf, "#111827", 1.1, false);
+        strokeSeries(res.setpoints[cellIdx], yLevelOf, "#dc2626", 1.6, false);
+        strokeSeries(res.hFilt[cellIdx], yLevelOf, "#2563eb", 1.4, false);
+
+        ctx.fillStyle = "#334155";
+        ctx.font = "10px sans-serif";
+        ctx.textAlign = "right";
+        for (const lv of [24, 28, 31, 34, 38]) {
+          ctx.fillText(String(lv), pad.l - 4, yLevelOf(lv) + 3);
+        }
+        ctx.textAlign = "left";
+        for (const fl of [0, 35, 70, 105]) {
+          ctx.fillText(String(fl), pad.l + pw + 4, yFlowOf(fl) + 3);
+        }
+        ctx.textAlign = "center";
+        for (let tick = 0; tick <= tMax; tick += 150) {
+          const x = pad.l + (tick / tMax) * pw;
+          ctx.fillText(`${tick}s`, x, pad.t + ph + 16);
+        }
+      }
+
+      function updateSimulation() {
+        const duracionS = Number(elDuracion.value);
+        const ruidoStdCm = Number(elRuido.value);
+        const usarFiltroMediana = elFiltro.checked;
+        elLblDur.textContent = String(duracionS);
+        elLblRuido.textContent = ruidoStdCm.toFixed(2);
+
+        const resFb = simularBancoFlotacion({
+          duracionS,
+          modo: "feedback",
+          paramsCeldas: state.params,
+          ruidoStdCm,
+          usarFiltroMediana,
+        });
+        const resFf = simularBancoFlotacion({
+          duracionS,
+          modo: "feedback_feedforward",
+          paramsCeldas: state.params,
+          ruidoStdCm,
+          usarFiltroMediana,
+        });
+
+        elMetrics.innerHTML = [0, 1, 2]
+          .map((i) => {
+            const mejora =
+              ((resFb.iae[i] - resFf.iae[i]) / Math.max(resFb.iae[i], 1e-6)) * 100.0;
+            return `
+              <div class="metric-card">
+                <div class="label">Celda ${i + 1} — IAE Feedback + FF</div>
+                <div class="val">${resFf.iae[i].toFixed(2)} cm·s</div>
+                <div class="delta">Mejora ${mejora.toFixed(1)}% vs. Feedback (${resFb.iae[i].toFixed(2)} cm·s)</div>
+              </div>
+            `;
+          })
+          .join("");
+
+        elCharts.innerHTML = "";
+        for (let i = 0; i < 3; i++) {
+          for (const [res, titulo] of [
+            [resFb, "Feedback-only"],
+            [resFf, "Feedback + Feedforward"],
+          ]) {
+            const box = document.createElement("div");
+            box.className = "chart-box";
+            box.innerHTML = `
+              <div class="chart-title">${titulo} - Celda ${i + 1} | IAE = ${res.iae[i].toFixed(1)} cm·s</div>
+              <canvas></canvas>
+            `;
+            elCharts.appendChild(box);
+            drawPlot(box.querySelector("canvas"), res, i);
+          }
+        }
+      }
+
+      elPreset.addEventListener("change", () => {
+        if (elPreset.value === "final") {
+          state.params = SIMC_PARAMS_FINAL.map((p) => ({ ...p }));
+        } else if (elPreset.value === "initial") {
+          state.params = SIMC_PARAMS_INITIAL.map((p) => ({ ...p }));
+        }
+        buildCellControls();
+        updateSimulation();
+      });
+      elDuracion.addEventListener("input", updateSimulation);
+      elRuido.addEventListener("input", updateSimulation);
+      elFiltro.addEventListener("change", updateSimulation);
+      window.addEventListener("resize", updateSimulation);
+
+      buildCellControls();
+      updateSimulation();
+    }
+  </script>
+</body>
+</html>
